@@ -6,19 +6,23 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:exe": "npm run build && C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe /target:winexe /r:System.Windows.Forms.dll /out:ExcelView.exe launcher.cs",
+    "app": ".\\ExcelView.exe"
   },
   "dependencies": {
-    "vue": "^3.5.10",
-    "xlsx": "^0.18.5",
+    "canvas-confetti": "^1.9.3",
     "lucide-vue-next": "^0.453.0",
-    "canvas-confetti": "^1.9.3"
+    "vue": "^3.5.10",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.1.4",
-    "vite": "^5.4.8",
-    "tailwindcss": "^3.4.13",
+    "autoprefixer": "^10.4.20",
+    "electron": "^44.4.1",
+    "electron-packager": "^17.1.2",
     "postcss": "^8.4.47",
-    "autoprefixer": "^10.4.20"
+    "tailwindcss": "^3.4.13",
+    "vite": "^5.4.8"
   }
 }

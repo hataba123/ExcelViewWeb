@@ -56,12 +56,21 @@ Khi mở file Excel truyền thống để học tập, người dùng thường
 
 ### Các bước khởi chạy
 
+#### Cách 1: Chạy trực tiếp bằng file `ExcelView.exe` (Khuyên dùng - Nhanh nhất!) ⚡
+- Nhấp đúp trực tiếp vào file **`ExcelView.exe`** trong thư mục dự án hoặc shortcut **`ExcelView Pro`** ngoài màn hình Desktop.
+- Ứng dụng sẽ tự động mở trong cửa sổ desktop riêng biệt, không có thanh địa chỉ, mở tức thì và cực kỳ mượt mà!
+- Để build lại file `.exe` sau khi chỉnh sửa code:
+  ```bash
+  npm run build:exe
+  ```
+
+#### Cách 2: Chạy qua máy chủ Web (Development)
 1. **Cài đặt thư viện dependencies:**
    ```bash
    npm install
    ```
 
-2. **Chạy máy chủ phát triển (Development Server):**
+2. **Chạy dev server:**
    ```bash
    npm run dev
    ```
