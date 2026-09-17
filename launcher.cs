@@ -4,43 +4,49 @@ using System.Net;
 using System.Text;
 using System.Threading;
 using System.Diagnostics;
-using System.Collections.Generic;
+using System.Windows.Forms;
 
 namespace ExcelViewLauncher
 {
-    class Program
+    static class Program
     {
-        static HttpListener listener;
-        static string baseDirectory;
-        static int port = 54321;
-        static Process browserProcess;
+        private static HttpListener listener;
+        private static string baseDirectory;
+        private static int port = 54321;
+        private static DateTime lastHeartbeat = DateTime.Now;
+        private static DateTime startTime = DateTime.Now;
+        private static Process browserProcess;
+        private static Mutex singleInstanceMutex;
 
+        [STAThread]
         static void Main(string[] args)
         {
-            // Base directory where dist folder resides
+            // Ensure single instance per machine
+            bool createdNew;
+            singleInstanceMutex = new Mutex(true, "ExcelViewPro_SingleInstance_Mutex", out createdNew);
+
             string currentDir = AppDomain.CurrentDomain.BaseDirectory;
             baseDirectory = Path.Combine(currentDir, "dist");
 
             if (!Directory.Exists(baseDirectory))
             {
-                // Fallback: check if we are in another directory
                 if (Directory.Exists(Path.Combine(currentDir, "..", "dist")))
                 {
                     baseDirectory = Path.GetFullPath(Path.Combine(currentDir, "..", "dist"));
                 }
                 else
                 {
-                    System.Windows.Forms.MessageBox.Show(
+                    MessageBox.Show(
                         "Không tìm thấy thư mục 'dist'. Vui lòng đảm bảo ứng dụng đã được build hoặc thư mục dist nằm cùng cấp với file ExcelView.exe.",
                         "ExcelView Pro - Lỗi",
-                        System.Windows.Forms.MessageBoxButtons.OK,
-                        System.Windows.Forms.MessageBoxIcon.Error
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error
                     );
                     return;
                 }
             }
 
-            // Find an open port
+            // Find an available port
             listener = new HttpListener();
             bool started = false;
             for (int p = 54321; p < 54400; p++)
@@ -56,64 +62,143 @@ namespace ExcelViewLauncher
                 }
                 catch
                 {
-                    // Try next port
+                    // Port in use, try next
                 }
             }
 
             if (!started)
             {
-                System.Windows.Forms.MessageBox.Show("Không thể khởi tạo cổng mạng cục bộ.", "Lỗi");
+                MessageBox.Show("Không thể khởi tạo cổng mạng cục bộ 127.0.0.1.", "ExcelView Pro - Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
-            // Start HTTP listener in background thread
+            startTime = DateTime.Now;
+            lastHeartbeat = DateTime.Now;
+
+            // Start HTTP listener on a background thread
             Thread serverThread = new Thread(ListenLoop);
             serverThread.IsBackground = true;
             serverThread.Start();
 
             string appUrl = "http://127.0.0.1:" + port + "/";
 
-            // Launch Edge in App Mode for dedicated, frameless window
+            // Launch Browser in App Mode
+            LaunchAppWindow(appUrl);
+
+            // Heartbeat & Process Monitor Loop
+            while (true)
+            {
+                Thread.Sleep(1000);
+
+                // If browser process is still running with dedicated PID, keep alive
+                if (browserProcess != null && !browserProcess.HasExited)
+                {
+                    continue;
+                }
+
+                // If browser process exited or was delegated, check heartbeat
+                // Must give at least 15s grace period upon initial launch
+                double totalRunTime = (DateTime.Now - startTime).TotalSeconds;
+                double timeSinceHeartbeat = (DateTime.Now - lastHeartbeat).TotalSeconds;
+
+                if (totalRunTime > 15)
+                {
+                    // If no heartbeat for more than 8 seconds, the window was closed
+                    if (timeSinceHeartbeat > 8)
+                    {
+                        break;
+                    }
+                }
+            }
+
+            // Clean shutdown
+            try
+            {
+                if (listener != null)
+                {
+                    listener.Stop();
+                    listener.Close();
+                }
+            }
+            catch { }
+        }
+
+        private static void LaunchAppWindow(string url)
+        {
+            string profileDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ExcelViewPro",
+                "Profile"
+            );
+
+            try
+            {
+                if (!Directory.Exists(profileDir))
+                {
+                    Directory.CreateDirectory(profileDir);
+                }
+            }
+            catch { }
+
+            // 1. Try Microsoft Edge (Installed on all Windows 10/11)
             string edgePath = @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe";
             if (!File.Exists(edgePath))
             {
                 edgePath = @"C:\Program Files\Microsoft\Edge\Application\msedge.exe";
             }
 
+            // 2. Try Google Chrome as fallback
+            string chromePath = @"C:\Program Files\Google\Chrome\Application\chrome.exe";
+            if (!File.Exists(chromePath))
+            {
+                chromePath = @"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe";
+            }
+
+            string targetBrowser = null;
             if (File.Exists(edgePath))
             {
-                ProcessStartInfo psi = new ProcessStartInfo();
-                psi.FileName = edgePath;
-                psi.Arguments = string.Format("--app=\"{0}\" --window-size=1320,860 --app-id=ExcelViewPro", appUrl);
-                psi.UseShellExecute = false;
-                browserProcess = Process.Start(psi);
-
-                if (browserProcess != null)
-                {
-                    browserProcess.WaitForExit();
-                }
+                targetBrowser = edgePath;
             }
-            else
+            else if (File.Exists(chromePath))
             {
-                // Fallback: Open in default browser
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = appUrl,
-                    UseShellExecute = true
-                });
-
-                // Keep alive until user closes or 24 hours
-                Thread.Sleep(86400000);
+                targetBrowser = chromePath;
             }
 
+            if (targetBrowser != null)
+            {
+                try
+                {
+                    ProcessStartInfo psi = new ProcessStartInfo();
+                    psi.FileName = targetBrowser;
+                    // Passing --user-data-dir makes Chromium run as an independent, persistent process!
+                    psi.Arguments = string.Format(
+                        "--user-data-dir=\"{0}\" --app=\"{1}\" --window-size=1320,860 --app-id=ExcelViewPro",
+                        profileDir,
+                        url
+                    );
+                    psi.UseShellExecute = false;
+                    browserProcess = Process.Start(psi);
+                    return;
+                }
+                catch { }
+            }
+
+            // Fallback: Default Browser
             try
             {
-                listener.Stop();
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true
+                });
             }
-            catch { }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Không thể mở trình duyệt: " + ex.Message, "Lỗi");
+            }
         }
 
-        static void ListenLoop()
+        private static void ListenLoop()
         {
             while (listener != null && listener.IsListening)
             {
@@ -129,17 +214,29 @@ namespace ExcelViewLauncher
             }
         }
 
-        static void HandleRequest(HttpListenerContext context)
+        private static void HandleRequest(HttpListenerContext context)
         {
             try
             {
                 string rawUrl = context.Request.Url.AbsolutePath;
+
+                // Handle heartbeat ping
+                if (rawUrl == "/api/heartbeat")
+                {
+                    lastHeartbeat = DateTime.Now;
+                    byte[] pong = Encoding.UTF8.GetBytes("{\"status\":\"ok\"}");
+                    context.Response.ContentType = "application/json";
+                    context.Response.ContentLength64 = pong.Length;
+                    context.Response.StatusCode = 200;
+                    context.Response.OutputStream.Write(pong, 0, pong.Length);
+                    return;
+                }
+
                 if (string.IsNullOrEmpty(rawUrl) || rawUrl == "/")
                 {
                     rawUrl = "/index.html";
                 }
 
-                // Decode URL path
                 rawUrl = rawUrl.TrimStart('/');
                 rawUrl = Uri.UnescapeDataString(rawUrl);
 
@@ -147,7 +244,6 @@ namespace ExcelViewLauncher
 
                 if (!File.Exists(filePath))
                 {
-                    // SPA fallback: return index.html
                     filePath = Path.Combine(baseDirectory, "index.html");
                 }
 
@@ -181,7 +277,7 @@ namespace ExcelViewLauncher
             }
         }
 
-        static string GetMimeType(string ext)
+        private static string GetMimeType(string ext)
         {
             switch (ext)
             {

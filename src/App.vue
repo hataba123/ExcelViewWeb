@@ -382,12 +382,20 @@ function handleKeyDown(e) {
   }
 }
 
+let heartbeatTimer = null
+
 onMounted(() => {
   applyTheme(theme.value)
   window.addEventListener('keydown', handleKeyDown)
+  
+  // Heartbeat ping for desktop launcher
+  heartbeatTimer = setInterval(() => {
+    fetch('/api/heartbeat').catch(() => {})
+  }, 2000)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
+  if (heartbeatTimer) clearInterval(heartbeatTimer)
 })
 </script>
